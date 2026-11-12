@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FF0E0E0E</color>
+    <color name="card">#FF191919</color>
+    <color name="line">#FF262626</color>
+    <color name="text">#FFEDEDED</color>
+    <color name="muted">#FF8A8A8A</color>
+    <color name="accent">#FFFFB300</color>
+
+    <string name="app_name">Заметки</string>
+
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:textColorPrimary">@color/text</item>
+    </style>
+</resources>

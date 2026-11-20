@@ -9,7 +9,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.view.View;
 import android.widget.Switch;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
@@ -24,6 +26,8 @@ public class MainActivity extends Activity {
     private static final int REQ = 7;
 
     private SharedPreferences prefs;
+    private TextView permState;
+    private View btnPerm;
     private boolean pendingArm;
 
     @Override
@@ -32,6 +36,10 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+
+        permState = findViewById(R.id.perm_state);
+        btnPerm = findViewById(R.id.btn_perm);
+        btnPerm.setOnClickListener(v -> openOverlaySettings());
 
         Switch swSound = findViewById(R.id.sw_sound);
         Switch swVibro = findViewById(R.id.sw_vibro);
@@ -56,20 +64,30 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (pendingArm && Settings.canDrawOverlays(this)) {
+        boolean granted = Settings.canDrawOverlays(this);
+        permState.setText(granted
+                ? "Разрешение «плавающие окна»: выдано"
+                : "Разрешение «плавающие окна»: нет");
+        btnPerm.setVisibility(granted ? View.GONE : View.VISIBLE);
+
+        if (granted && pendingArm) {
             pendingArm = false;
             askPermissions();
         }
     }
 
+    private void openOverlaySettings() {
+        pendingArm = true;
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) { }
+    }
+
     private void collapse() {
         if (!Settings.canDrawOverlays(this)) {
-            pendingArm = true;
-            Toast.makeText(this, "Разреши «поверх других приложений» и вернись", Toast.LENGTH_LONG).show();
-            try {
-                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName())));
-            } catch (Exception ignored) { }
+            Toast.makeText(this, "Сначала выдай разрешение", Toast.LENGTH_SHORT).show();
+            openOverlaySettings();
             return;
         }
         askPermissions();

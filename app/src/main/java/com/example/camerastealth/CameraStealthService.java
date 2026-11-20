@@ -13,16 +13,9 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
-import android.hardware.camera2.CameraCaptureSession;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraDevice;
-import android.hardware.camera2.CameraManager;
-import android.hardware.camera2.CaptureRequest;
 import android.media.AudioManager;
 import android.media.MediaActionSound;
-import android.media.MediaRecorder;
 import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -31,14 +24,7 @@ import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
-import android.view.Surface;
-import android.view.WindowManager;
-
-import java.io.File;
-import java.text.SimpleDateFormat;
-import java.util.Collections;
-import java.util.Date;
-import java.util.Locale;
+import android.provider.Settings;
 
 public class CameraStealthService extends Service implements DotOverlay.Listener {
 
@@ -47,18 +33,16 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
     private static final long BURST_MS = 320;
     private static final int BURST_LONG = 4;
 
+    public static volatile boolean running;
+    public static volatile boolean rec;
+
     private Handler ui;
     private Handler cam;
     private HandlerThread camThread;
 
     private DotOverlay dot;
+    private Recorder engine;
 
-    private CameraManager camManager;
-    private CameraDevice device;
-    private CameraCaptureSession session;
-    private MediaRecorder recorder;
-
-    private String camId = "0";
     private boolean front;
     private boolean recording;
     private boolean mic;
@@ -116,11 +100,18 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         sound = p.getBoolean("sound", false);
         vibro = p.getBoolean("vibro", true);
 
+        engine = new Recorder(this, cam);
+        engine.setMic(mic);
+
+        running = true;
+
         createChannel();
         startForegroundNow();
 
-        dot = new DotOverlay(this, this);
-        dot.show();
+        if (Settings.canDrawOverlays(this)) {
+            dot = new DotOverlay(this, this);
+            dot.show();
+        }
 
         rememberVolume();
         registerVolume();
@@ -136,8 +127,6 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
     public void onLongPress() {
         disarm();
     }
-
-    // ---------- управление ----------
 
     private void toggle() {
         if (recording) stopRecording();
@@ -155,26 +144,9 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         boolean was = recording;
         if (was) stopRecording();
         front = !front;
-        camId = findCamera(front);
+        engine.setFront(front);
         if (was) ui.postDelayed(this::startRecording, 700);
     }
-
-    private String findCamera(boolean wantFront) {
-        try {
-            CameraManager m = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-            if (m == null) return camId;
-            for (String id : m.getCameraIdList()) {
-                Integer facing = m.getCameraCharacteristics(id)
-                        .get(CameraCharacteristics.LENS_FACING);
-                if (facing == null) continue;
-                if (wantFront && facing == CameraCharacteristics.LENS_FACING_FRONT) return id;
-                if (!wantFront && facing == CameraCharacteristics.LENS_FACING_BACK) return id;
-            }
-        } catch (Exception ignored) { }
-        return camId;
-    }
-
-    // ---------- громкость ----------
 
     private void rememberVolume() {
         try {
@@ -200,163 +172,28 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         } catch (Exception ignored) { }
     }
 
-    // ---------- запись ----------
-
     private void startRecording() {
         if (recording) return;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
 
         recording = true;
-        dot.setRecording(true);
+        rec = true;
+        if (dot != null) dot.setRecording(true);
         feedback(true);
         ui.removeCallbacks(maxStop);
         ui.postDelayed(maxStop, MAX_RECORD_MS);
-        cam.post(this::openAndRecord);
-    }
-
-    private void openAndRecord() {
-        try {
-            camManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-            if (camManager == null) { abort(); return; }
-            camId = findCamera(front);
-
-            File dir = new File(getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Stealth");
-            if (!dir.exists()) dir.mkdirs();
-            String name = "VID_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-                    .format(new Date()) + ".mp4";
-            File out = new File(dir, name);
-
-            recorder = new MediaRecorder();
-            recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
-            if (mic) recorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
-            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-            recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
-            recorder.setVideoSize(1280, 720);
-            recorder.setVideoFrameRate(30);
-            recorder.setVideoEncodingBitRate(6000000);
-            if (mic) {
-                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-                recorder.setAudioEncodingBitRate(96000);
-                recorder.setAudioSamplingRate(44100);
-            }
-            recorder.setOrientationHint(orientationHint());
-            recorder.setOutputFile(out.getAbsolutePath());
-            recorder.prepare();
-
-            final Surface surface = recorder.getSurface();
-            camManager.openCamera(camId, new CameraDevice.StateCallback() {
-                @Override
-                public void onOpened(CameraDevice c) {
-                    device = c;
-                    configure(c, surface);
-                }
-
-                @Override
-                public void onDisconnected(CameraDevice c) {
-                    c.close();
-                    device = null;
-                }
-
-                @Override
-                public void onError(CameraDevice c, int error) {
-                    c.close();
-                    device = null;
-                    abort();
-                }
-            }, cam);
-        } catch (Exception ignored) {
-            abort();
-        }
-    }
-
-    private void configure(CameraDevice c, Surface surface) {
-        try {
-            c.createCaptureSession(Collections.singletonList(surface),
-                    new CameraCaptureSession.StateCallback() {
-                        @Override
-                        public void onConfigured(CameraCaptureSession s) {
-                            session = s;
-                            try {
-                                CaptureRequest.Builder b =
-                                        c.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-                                b.addTarget(surface);
-                                s.setRepeatingRequest(b.build(), null, cam);
-                                recorder.start();
-                            } catch (Exception ignored) {
-                                abort();
-                            }
-                        }
-
-                        @Override
-                        public void onConfigureFailed(CameraCaptureSession s) {
-                            abort();
-                        }
-                    }, cam);
-        } catch (Exception ignored) {
-            abort();
-        }
+        engine.start();
     }
 
     private void stopRecording() {
         if (!recording) return;
         recording = false;
+        rec = false;
         ui.removeCallbacks(maxStop);
-        dot.setRecording(false);
+        if (dot != null) dot.setRecording(false);
         feedback(false);
-        cam.post(this::releaseCamera);
+        engine.stop();
     }
-
-    private void releaseCamera() {
-        try {
-            if (session != null) {
-                session.stopRepeating();
-                session.close();
-            }
-        } catch (Exception ignored) { }
-        session = null;
-        try { if (recorder != null) recorder.stop(); } catch (Exception ignored) { }
-        try { if (recorder != null) recorder.reset(); } catch (Exception ignored) { }
-        try { if (recorder != null) recorder.release(); } catch (Exception ignored) { }
-        recorder = null;
-        try { if (device != null) device.close(); } catch (Exception ignored) { }
-        device = null;
-    }
-
-    private void abort() {
-        releaseCamera();
-        ui.post(() -> {
-            if (recording) {
-                recording = false;
-                ui.removeCallbacks(maxStop);
-                dot.setRecording(false);
-            }
-        });
-    }
-
-    private int orientationHint() {
-        try {
-            int sensor = camManager.getCameraCharacteristics(camId)
-                    .get(CameraCharacteristics.SENSOR_ORIENTATION);
-            int rotation = getDisplayRotation();
-            return front ? (sensor + rotation) % 360 : (sensor - rotation + 360) % 360;
-        } catch (Exception ignored) {
-            return 90;
-        }
-    }
-
-    private int getDisplayRotation() {
-        try {
-            WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-            if (wm == null) return 0;
-            int r = wm.getDefaultDisplay().getRotation();
-            if (r == Surface.ROTATION_90) return 90;
-            if (r == Surface.ROTATION_180) return 180;
-            if (r == Surface.ROTATION_270) return 270;
-        } catch (Exception ignored) { }
-        return 0;
-    }
-
-    // ---------- отклик ----------
 
     private void feedback(boolean start) {
         if (vibro) {
@@ -393,8 +230,6 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         }
         return (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
     }
-
-    // ---------- служба ----------
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT < 26) return;
@@ -456,13 +291,16 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
 
     private void disarm() {
         stopRecording();
-        dot.hide();
+        if (dot != null) dot.hide();
         stopSelf();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (dot != null) dot.show();
+        String action = intent == null ? null : intent.getAction();
+        if ("toggle".equals(action)) toggle();
+        if ("disarm".equals(action)) disarm();
         return START_STICKY;
     }
 
@@ -470,6 +308,7 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
     public void onDestroy() {
         ui.removeCallbacksAndMessages(null);
         stopRecording();
+        running = false;
         if (dot != null) dot.hide();
         try { unregisterReceiver(volumeReceiver); } catch (Exception ignored) { }
         try { if (actionSound != null) actionSound.release(); } catch (Exception ignored) { }

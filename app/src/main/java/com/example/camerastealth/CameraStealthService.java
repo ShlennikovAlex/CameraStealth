@@ -6,13 +6,15 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
-import android.graphics.drawable.GradientDrawable;
 import android.graphics.PixelFormat;
+import android.graphics.drawable.GradientDrawable;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
@@ -20,11 +22,7 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.media.AudioManager;
 import android.media.MediaActionSound;
-import android.media.MediaMetadata;
 import android.media.MediaRecorder;
-import android.media.VolumeProvider;
-import android.media.session.MediaSession;
-import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
@@ -83,8 +81,8 @@ public class CameraStealthService extends Service {
     private boolean vibro;
     private boolean longPressed;
     private int burst;
+    private int baseVolume = -1;
 
-    private MediaSession mediaSession;
     private MediaActionSound actionSound;
     private PowerManager.WakeLock wakeLock;
 
@@ -106,6 +104,35 @@ public class CameraStealthService extends Service {
 
     private final Runnable maxStop = this::stopRecording;
 
+    private final BroadcastReceiver volumeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) return;
+            if (!"android.media.VOLUME_CHANGED_ACTION".equals(intent.getAction())) return;
+
+            int stream = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1);
+            if (stream != AudioManager.STREAM_MUSIC) return;
+
+            int now = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1);
+            if (now < 0 || baseVolume < 0) return;
+
+            if (now == baseVolume) return;
+
+            boolean down = now < baseVolume;
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, baseVolume, 0); }
+                catch (Exception ignored) { }
+            }
+
+            if (!down) return;
+
+            burst++;
+            ui.removeCallbacks(burstEnd);
+            ui.postDelayed(burstEnd, BURST_MS);
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -123,7 +150,8 @@ public class CameraStealthService extends Service {
         createChannel();
         startForegroundNow();
         showDot();
-        setupVolumeKeys();
+        rememberVolume();
+        registerVolume();
         acquireWake();
     }
 
@@ -162,6 +190,32 @@ public class CameraStealthService extends Service {
             }
         } catch (Exception ignored) { }
         return camId;
+    }
+
+    // ---------- громкость ----------
+
+    private void rememberVolume() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return;
+            baseVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+            if (Build.VERSION.SDK_INT >= 28
+                    && baseVolume <= am.getStreamMinVolume(AudioManager.STREAM_MUSIC)) {
+                baseVolume = am.getStreamMinVolume(AudioManager.STREAM_MUSIC) + 1;
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, baseVolume, 0);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void registerVolume() {
+        try {
+            IntentFilter f = new IntentFilter("android.media.VOLUME_CHANGED_ACTION");
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(volumeReceiver, f, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(volumeReceiver, f);
+            }
+        } catch (Exception ignored) { }
     }
 
     // ---------- запись ----------
@@ -293,265 +347,4 @@ public class CameraStealthService extends Service {
                 recording = false;
                 ui.removeCallbacks(maxStop);
                 ui.removeCallbacks(blink);
-                setDot(false);
-            }
-        });
-    }
-
-    private int orientationHint() {
-        try {
-            int sensor = camManager.getCameraCharacteristics(camId)
-                    .get(CameraCharacteristics.SENSOR_ORIENTATION);
-            int rotation = getDisplayRotation();
-            return front ? (sensor + rotation) % 360 : (sensor - rotation + 360) % 360;
-        } catch (Exception ignored) {
-            return 90;
-        }
-    }
-
-    private int getDisplayRotation() {
-        try {
-            int r = wm.getDefaultDisplay().getRotation();
-            if (r == Surface.ROTATION_90) return 90;
-            if (r == Surface.ROTATION_180) return 180;
-            if (r == Surface.ROTATION_270) return 270;
-        } catch (Exception ignored) { }
-        return 0;
-    }
-
-    // ---------- точка ----------
-
-    private void showDot() {
-        if (zone != null) return;
-        wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-
-        dotDrawable = new GradientDrawable();
-        dotDrawable.setShape(GradientDrawable.OVAL);
-        dotDrawable.setColor(COLOR_IDLE);
-
-        zone = new FrameLayout(this);
-        dot = new View(this);
-        dot.setBackground(dotDrawable);
-        FrameLayout.LayoutParams lp =
-                new FrameLayout.LayoutParams(dp(DP_DOT), dp(DP_DOT), Gravity.CENTER);
-        zone.addView(dot, lp);
-
-        zoneParams = new WindowManager.LayoutParams(
-                dp(DP_ZONE), dp(DP_ZONE),
-                Build.VERSION.SDK_INT >= 26
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT);
-        zoneParams.gravity = Gravity.BOTTOM | Gravity.END;
-        zoneParams.x = dp(12);
-        zoneParams.y = dp(96);
-
-        zone.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
-                if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                    longPressed = false;
-                    ui.postDelayed(longPress, 480);
-                    return true;
-                }
-                if (e.getAction() == MotionEvent.ACTION_UP
-                        || e.getAction() == MotionEvent.ACTION_CANCEL) {
-                    ui.removeCallbacks(longPress);
-                    if (!longPressed) toggle();
-                    return true;
-                }
-                return true;
-            }
-        });
-
-        try {
-            wm.addView(zone, zoneParams);
-        } catch (Exception ignored) {
-            zone = null;
-        }
-    }
-
-    private void hideDot() {
-        if (zone == null) return;
-        try { wm.removeView(zone); } catch (Exception ignored) { }
-        zone = null;
-        dot = null;
-    }
-
-    private void setDot(boolean rec) {
-        if (dot == null) return;
-        ui.removeCallbacks(blink);
-        dotDrawable.setColor(rec ? COLOR_REC : COLOR_IDLE);
-        dot.setAlpha(1f);
-        if (rec) ui.postDelayed(blink, 700);
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
-    // ---------- отклик ----------
-
-    private void feedback(boolean start) {
-        if (vibro) {
-            try {
-                Vibrator v = vibrator();
-                if (v != null) {
-                    if (Build.VERSION.SDK_INT >= 26) {
-                        v.vibrate(VibrationEffect.createOneShot(28, VibrationEffect.DEFAULT_AMPLITUDE));
-                    } else {
-                        v.vibrate(28);
-                    }
-                }
-            } catch (Exception ignored) { }
-        }
-        if (sound) {
-            try {
-                if (actionSound == null) {
-                    actionSound = new MediaActionSound();
-                    actionSound.load(MediaActionSound.START_VIDEO_RECORDING);
-                    actionSound.load(MediaActionSound.STOP_VIDEO_RECORDING);
-                }
-                actionSound.play(start
-                        ? MediaActionSound.START_VIDEO_RECORDING
-                        : MediaActionSound.STOP_VIDEO_RECORDING);
-            } catch (Exception ignored) { }
-        }
-    }
-
-    private Vibrator vibrator() {
-        if (Build.VERSION.SDK_INT >= 31) {
-            VibratorManager m = (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-            return m == null ? null : m.getDefaultVibrator();
-        }
-        return (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-    }
-
-    // ---------- качельки ----------
-
-    private void setupVolumeKeys() {
-        try {
-            mediaSession = new MediaSession(this, "stealth");
-            mediaSession.setMetadata(new MediaMetadata.Builder()
-                    .putString(MediaMetadata.METADATA_KEY_TITLE, "Заметки")
-                    .build());
-            mediaSession.setPlaybackState(new PlaybackState.Builder()
-                    .setState(PlaybackState.STATE_PLAYING, 0, 1f)
-                    .build());
-
-            mediaSession.setPlaybackToRemote(
-                    new VolumeProvider(VolumeProvider.VOLUME_CONTROL_RELATIVE, 100, 50) {
-                        @Override
-                        public void onAdjustVolume(int direction) {
-                            if (direction > 0) {
-                                try {
-                                    AudioManager am =
-                                            (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                                    if (am != null) {
-                                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC,
-                                                AudioManager.ADJUST_RAISE,
-                                                AudioManager.FLAG_SHOW_UI);
-                                    }
-                                } catch (Exception ignored) { }
-                                return;
-                            }
-                            burst++;
-                            ui.removeCallbacks(burstEnd);
-                            ui.postDelayed(burstEnd, BURST_MS);
-                        }
-                    });
-            mediaSession.setActive(true);
-        } catch (Exception ignored) { }
-    }
-
-    // ---------- служба ----------
-
-    private void createChannel() {
-        if (Build.VERSION.SDK_INT < 26) return;
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm == null) return;
-        NotificationChannel ch = new NotificationChannel(CHANNEL, "Съёмка",
-                NotificationManager.IMPORTANCE_MIN);
-        ch.setShowBadge(false);
-        nm.createNotificationChannel(ch);
-    }
-
-    private void startForegroundNow() {
-        Notification n = buildNotification();
-        try {
-            if (Build.VERSION.SDK_INT >= 29) {
-                int type = 0;
-                if (checkSelfPermission(Manifest.permission.CAMERA)
-                        == PackageManager.PERMISSION_GRANTED) {
-                    type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
-                }
-                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                        == PackageManager.PERMISSION_GRANTED) {
-                    type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
-                }
-                if (type != 0) {
-                    startForeground(1, n, type);
-                    return;
-                }
-            }
-            startForeground(1, n);
-        } catch (Exception ignored) { }
-    }
-
-    private Notification buildNotification() {
-        PendingIntent pi = PendingIntent.getActivity(this, 0,
-                new Intent(this, MainActivity.class),
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-
-        Notification.Builder b = Build.VERSION.SDK_INT >= 26
-                ? new Notification.Builder(this, CHANNEL)
-                : new Notification.Builder(this);
-
-        return b.setContentTitle("Заметки")
-                .setContentText("Свернуто")
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentIntent(pi)
-                .setOngoing(true)
-                .build();
-    }
-
-    private void acquireWake() {
-        try {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm == null) return;
-            wakeLock = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "stealth:screen");
-            wakeLock.acquire();
-        } catch (Exception ignored) { }
-    }
-
-    private void disarm() {
-        stopRecording();
-        hideDot();
-        stopSelf();
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        showDot();
-        return START_STICKY;
-    }
-
-    @Override
-    public void onDestroy() {
-        ui.removeCallbacksAndMessages(null);
-        stopRecording();
-        hideDot();
-        try { if (mediaSession != null) mediaSession.release(); } catch (Exception ignored) { }
-        try { if (actionSound != null) actionSound.release(); } catch (Exception ignored) { }
-        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) { }
-        if (camThread != null) camThread.quitSafely();
-        super.onDestroy();
-    }
-
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
-}
+                setDot

@@ -13,8 +13,6 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
-import android.graphics.PixelFormat;
-import android.graphics.drawable.GradientDrawable;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
@@ -33,12 +31,8 @@ import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
-import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.Surface;
-import android.view.View;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -46,27 +40,18 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 
-public class CameraStealthService extends Service {
+public class CameraStealthService extends Service implements DotOverlay.Listener {
 
     private static final String CHANNEL = "stealth";
     private static final long MAX_RECORD_MS = 20 * 60 * 1000L;
     private static final long BURST_MS = 320;
     private static final int BURST_LONG = 4;
 
-    private static final int COLOR_IDLE = 0xFF9E9E9E;
-    private static final int COLOR_REC = 0xFFE53935;
-    private static final int DP_DOT = 10;
-    private static final int DP_ZONE = 44;
-
-    private WindowManager wm;
-    private FrameLayout zone;
-    private View dot;
-    private GradientDrawable dotDrawable;
-    private WindowManager.LayoutParams zoneParams;
-
     private Handler ui;
     private Handler cam;
     private HandlerThread camThread;
+
+    private DotOverlay dot;
 
     private CameraManager camManager;
     private CameraDevice device;
@@ -79,7 +64,6 @@ public class CameraStealthService extends Service {
     private boolean mic;
     private boolean sound;
     private boolean vibro;
-    private boolean longPressed;
     private int burst;
     private int baseVolume = -1;
 
@@ -87,21 +71,6 @@ public class CameraStealthService extends Service {
     private PowerManager.WakeLock wakeLock;
 
     private final Runnable burstEnd = this::onBurstEnd;
-
-    private final Runnable longPress = () -> {
-        longPressed = true;
-        disarm();
-    };
-
-    private final Runnable blink = new Runnable() {
-        @Override
-        public void run() {
-            if (!recording) return;
-            dot.setAlpha(dot.getAlpha() > 0.6f ? 0.35f : 1f);
-            ui.postDelayed(this, 700);
-        }
-    };
-
     private final Runnable maxStop = this::stopRecording;
 
     private final BroadcastReceiver volumeReceiver = new BroadcastReceiver() {
@@ -115,10 +84,10 @@ public class CameraStealthService extends Service {
 
             int now = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1);
             if (now < 0 || baseVolume < 0) return;
-
             if (now == baseVolume) return;
 
             boolean down = now < baseVolume;
+
             AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
             if (am != null) {
                 try { am.setStreamVolume(AudioManager.STREAM_MUSIC, baseVolume, 0); }
@@ -149,10 +118,23 @@ public class CameraStealthService extends Service {
 
         createChannel();
         startForegroundNow();
-        showDot();
+
+        dot = new DotOverlay(this, this);
+        dot.show();
+
         rememberVolume();
         registerVolume();
         acquireWake();
+    }
+
+    @Override
+    public void onTap() {
+        toggle();
+    }
+
+    @Override
+    public void onLongPress() {
+        disarm();
     }
 
     // ---------- управление ----------
@@ -225,7 +207,7 @@ public class CameraStealthService extends Service {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
 
         recording = true;
-        setDot(true);
+        dot.setRecording(true);
         feedback(true);
         ui.removeCallbacks(maxStop);
         ui.postDelayed(maxStop, MAX_RECORD_MS);
@@ -295,7 +277,8 @@ public class CameraStealthService extends Service {
                         public void onConfigured(CameraCaptureSession s) {
                             session = s;
                             try {
-                                CaptureRequest.Builder b = c.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                                CaptureRequest.Builder b =
+                                        c.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
                                 b.addTarget(surface);
                                 s.setRepeatingRequest(b.build(), null, cam);
                                 recorder.start();
@@ -318,8 +301,7 @@ public class CameraStealthService extends Service {
         if (!recording) return;
         recording = false;
         ui.removeCallbacks(maxStop);
-        ui.removeCallbacks(blink);
-        setDot(false);
+        dot.setRecording(false);
         feedback(false);
         cam.post(this::releaseCamera);
     }
@@ -346,5 +328,160 @@ public class CameraStealthService extends Service {
             if (recording) {
                 recording = false;
                 ui.removeCallbacks(maxStop);
-                ui.removeCallbacks(blink);
-                setDot
+                dot.setRecording(false);
+            }
+        });
+    }
+
+    private int orientationHint() {
+        try {
+            int sensor = camManager.getCameraCharacteristics(camId)
+                    .get(CameraCharacteristics.SENSOR_ORIENTATION);
+            int rotation = getDisplayRotation();
+            return front ? (sensor + rotation) % 360 : (sensor - rotation + 360) % 360;
+        } catch (Exception ignored) {
+            return 90;
+        }
+    }
+
+    private int getDisplayRotation() {
+        try {
+            WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) return 0;
+            int r = wm.getDefaultDisplay().getRotation();
+            if (r == Surface.ROTATION_90) return 90;
+            if (r == Surface.ROTATION_180) return 180;
+            if (r == Surface.ROTATION_270) return 270;
+        } catch (Exception ignored) { }
+        return 0;
+    }
+
+    // ---------- отклик ----------
+
+    private void feedback(boolean start) {
+        if (vibro) {
+            try {
+                Vibrator v = vibrator();
+                if (v != null) {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        v.vibrate(VibrationEffect.createOneShot(28,
+                                VibrationEffect.DEFAULT_AMPLITUDE));
+                    } else {
+                        v.vibrate(28);
+                    }
+                }
+            } catch (Exception ignored) { }
+        }
+        if (sound) {
+            try {
+                if (actionSound == null) {
+                    actionSound = new MediaActionSound();
+                    actionSound.load(MediaActionSound.START_VIDEO_RECORDING);
+                    actionSound.load(MediaActionSound.STOP_VIDEO_RECORDING);
+                }
+                actionSound.play(start
+                        ? MediaActionSound.START_VIDEO_RECORDING
+                        : MediaActionSound.STOP_VIDEO_RECORDING);
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private Vibrator vibrator() {
+        if (Build.VERSION.SDK_INT >= 31) {
+            VibratorManager m = (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+            return m == null ? null : m.getDefaultVibrator();
+        }
+        return (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+    }
+
+    // ---------- служба ----------
+
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        NotificationChannel ch = new NotificationChannel(CHANNEL, "Съёмка",
+                NotificationManager.IMPORTANCE_MIN);
+        ch.setShowBadge(false);
+        nm.createNotificationChannel(ch);
+    }
+
+    private void startForegroundNow() {
+        Notification n = buildNotification();
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                int type = 0;
+                if (checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+                }
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+                }
+                if (type != 0) {
+                    startForeground(1, n, type);
+                    return;
+                }
+            }
+            startForeground(1, n);
+        } catch (Exception ignored) { }
+    }
+
+    private Notification buildNotification() {
+        PendingIntent pi = PendingIntent.getActivity(this, 0,
+                new Intent(this, MainActivity.class),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, CHANNEL)
+                : new Notification.Builder(this);
+
+        return b.setContentTitle("Заметки")
+                .setContentText("Свернуто")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setContentIntent(pi)
+                .setOngoing(true)
+                .build();
+    }
+
+    private void acquireWake() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return;
+            wakeLock = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "stealth:screen");
+            wakeLock.acquire();
+        } catch (Exception ignored) { }
+    }
+
+    private void disarm() {
+        stopRecording();
+        dot.hide();
+        stopSelf();
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (dot != null) dot.show();
+        return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        ui.removeCallbacksAndMessages(null);
+        stopRecording();
+        if (dot != null) dot.hide();
+        try { unregisterReceiver(volumeReceiver); } catch (Exception ignored) { }
+        try { if (actionSound != null) actionSound.release(); } catch (Exception ignored) { }
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Exception ignored) { }
+        if (camThread != null) camThread.quitSafely();
+        super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+}

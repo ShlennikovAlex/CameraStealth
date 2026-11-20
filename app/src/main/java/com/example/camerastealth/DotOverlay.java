@@ -25,7 +25,7 @@ class DotOverlay {
     private static final int DP_ZONE = 44;
 
     private final Context ctx;
-    private final Listener listener;
+    private Listener listener;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private WindowManager wm;

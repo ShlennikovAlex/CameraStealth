@@ -28,12 +28,15 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private TextView permState;
     private View btnPerm;
-    private boolean pendingArm;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         setContentView(R.layout.activity_main);
+
+        if (CameraStealthService.running) {
+            stopService(new Intent(this, CameraStealthService.class));
+        }
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 
@@ -65,19 +68,16 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         boolean granted = Settings.canDrawOverlays(this);
-        permState.setText(granted
-                ? "Разрешение «плавающие окна»: выдано"
-                : "Разрешение «плавающие окна»: нет");
-        btnPerm.setVisibility(granted ? View.GONE : View.VISIBLE);
-
-        if (granted && pendingArm) {
-            pendingArm = false;
-            askPermissions();
+        if (granted) {
+            permState.setText("Точка держится поверх любых приложений");
+            btnPerm.setVisibility(View.GONE);
+        } else {
+            permState.setText("Работает и без разрешения — точка пропадёт, если открыть другое приложение.\n\nХочешь, чтобы держалась везде: Настройки → Управление приложениями → Заметки → Разрешения → Плавающие окна.");
+            btnPerm.setVisibility(View.VISIBLE);
         }
     }
 
     private void openOverlaySettings() {
-        pendingArm = true;
         try {
             startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName())));
@@ -85,11 +85,6 @@ public class MainActivity extends Activity {
     }
 
     private void collapse() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Сначала выдай разрешение", Toast.LENGTH_SHORT).show();
-            openOverlaySettings();
-            return;
-        }
         askPermissions();
     }
 
@@ -129,6 +124,9 @@ public class MainActivity extends Activity {
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
             else startService(i);
+            if (!Settings.canDrawOverlays(this)) {
+                startActivity(new Intent(this, StealthActivity.class));
+            }
             finish();
         } catch (Exception e) {
             Toast.makeText(this, "Не запустилось", Toast.LENGTH_SHORT).show();

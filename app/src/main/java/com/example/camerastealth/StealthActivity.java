@@ -64,7 +64,7 @@ public class StealthActivity extends Activity {
     @Override
     public void onBackPressed() {
         try {
-            startService(new Intent(this, CameraStealthService.class).setAction("disarm"));
+            startActivity(new Intent(this, MainActivity.class));
         } catch (Exception ignored) { }
         finish();
     }
@@ -79,3 +79,4 @@ public class StealthActivity extends Activity {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }
+        

@@ -30,33 +30,45 @@
             android:textColor="@color/muted"
             android:textSize="12.5sp" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:background="@color/card"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:lineSpacingExtra="4dp"
+                android:text="1. Нажми «Свернуть» — приложение уйдёт в точку внизу экрана.\n2. Качелька вниз: старт записи. Ещё раз — стоп.\n3. Удержание качельки — смена камеры.\n4. Тап по точке — то же, что качелька.\n5. Удержание точки — вернуться сюда.\n6. Вернуться можно и по уведомлению в шторке."
+                android:textColor="@color/text"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:lineSpacingExtra="3dp"
+                android:text="Шкала громкости при нажатии мелькает и гаснет — громкость не меняется, так и задумано."
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/perm_state"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:text="Разрешение «плавающие окна»: нет"
+            android:layout_marginTop="14dp"
+            android:text=""
             android:textColor="@color/muted"
-            android:textSize="12.5sp" />
-
-        <TextView
-            android:id="@+id/btn_perm"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@color/card"
-            android:gravity="center"
-            android:paddingTop="14dp"
-            android:paddingBottom="14dp"
-            android:text="Выдать разрешение"
-            android:textColor="@color/accent"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textSize="12sp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="26dp"
+            android:layout_marginTop="24dp"
             android:text="РЕЖИМ"
             android:textColor="@color/muted"
             android:textSize="11sp" />
@@ -166,7 +178,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="22dp"
             android:gravity="center"
-            android:text="v1.0.0 · шаг 2: служба и точка"
+            android:text="v1.0.0 · шаг 3: возврат и инструкция"
             android:textColor="@color/line"
             android:textSize="11sp" />
 

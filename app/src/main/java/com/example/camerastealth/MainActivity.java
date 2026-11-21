@@ -5,11 +5,9 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.view.View;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -27,7 +25,6 @@ public class MainActivity extends Activity {
 
     private SharedPreferences prefs;
     private TextView permState;
-    private View btnPerm;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -39,10 +36,7 @@ public class MainActivity extends Activity {
         }
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-
         permState = findViewById(R.id.perm_state);
-        btnPerm = findViewById(R.id.btn_perm);
-        btnPerm.setOnClickListener(v -> openOverlaySettings());
 
         Switch swSound = findViewById(R.id.sw_sound);
         Switch swVibro = findViewById(R.id.sw_vibro);
@@ -67,28 +61,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        boolean granted = Settings.canDrawOverlays(this);
-        if (granted) {
-            permState.setText("Точка держится поверх любых приложений");
-            btnPerm.setVisibility(View.GONE);
-        } else {
-            permState.setText("Работает и без разрешения — точка пропадёт, если открыть другое приложение.\n\nХочешь, чтобы держалась везде: Настройки → Управление приложениями → Заметки → Разрешения → Плавающие окна.");
-            btnPerm.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private void openOverlaySettings() {
-        try {
-            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName())));
-        } catch (Exception ignored) { }
+        permState.setText(Settings.canDrawOverlays(this)
+                ? "Разрешение выдано: точка остаётся видна и поверх других приложений."
+                : "Разрешение не выдано: точка будет видна только на рабочем столе. Его спросят при сворачивании.");
     }
 
     private void collapse() {
-        askPermissions();
-    }
-
-    private void askPermissions() {
         List<String> need = new ArrayList<>();
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             need.add(Manifest.permission.CAMERA);

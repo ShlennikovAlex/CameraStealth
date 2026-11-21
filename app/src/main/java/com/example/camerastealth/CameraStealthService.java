@@ -125,6 +125,11 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
 
     @Override
     public void onLongPress() {
+        try {
+            Intent i = new Intent(this, MainActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception ignored) { }
         disarm();
     }
 

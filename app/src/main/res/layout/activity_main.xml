@@ -42,9 +42,18 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:lineSpacingExtra="4dp"
-                android:text="1. Нажми «Свернуть» — приложение уйдёт в точку внизу экрана.\n2. Видео: качелька вниз — старт, ещё раз — стоп.\n3. Фото: качелька вниз — снимок.\n4. Удержание качельки — смена камеры.\n5. Тап по точке — то же, что качелька.\n6. Удержание точки или «Назад» — вернуться сюда.\n7. Вернуться можно и по уведомлению в шторке."
+                android:text="1. Нажми «Свернуть» — приложение уйдёт в точку внизу экрана.\n2. Видео: качелька вниз — старт, ещё раз — стоп.\n3. Фото: качелька вниз — снимок.\n4. Качелька вверх — смена камеры. Синяя точка значит фронтальная.\n5. Тап по точке — то же, что качелька вниз.\n6. Удержание точки или «Назад» — вернуться сюда.\n7. Вернуться можно и по уведомлению в шторке."
                 android:textColor="@color/text"
                 android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:lineSpacingExtra="3dp"
+                android:text="Файлы попадают в галерею, альбом Stealth."
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <TextView
@@ -167,7 +176,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="22dp"
             android:gravity="center"
-            android:text="v1.0.0 · шаг 4: фото"
+            android:text="v1.0.0 · шаг 5: смена камеры и отклик"
             android:textColor="@color/line"
             android:textSize="11sp" />
 

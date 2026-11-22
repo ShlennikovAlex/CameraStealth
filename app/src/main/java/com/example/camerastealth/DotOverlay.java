@@ -7,6 +7,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -17,6 +18,7 @@ class DotOverlay {
     interface Listener {
         void onTap();
         void onLongPress();
+        void onVolumeDown();
     }
 
     private static final int COLOR_IDLE = 0xFF9E9E9E;
@@ -53,6 +55,31 @@ class DotOverlay {
         this.listener = listener;
     }
 
+    private class Zone extends FrameLayout {
+        Zone(Context c) {
+            super(c);
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent e) {
+            int code = e.getKeyCode();
+
+            if (code == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (e.getAction() == KeyEvent.ACTION_DOWN) listener.onVolumeDown();
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_VOLUME_UP) {
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_BACK
+                    && e.getAction() == KeyEvent.ACTION_DOWN) {
+                listener.onLongPress();
+                return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
+    }
+
     void show() {
         if (zone != null) return;
 
@@ -62,7 +89,8 @@ class DotOverlay {
         dotDrawable.setShape(GradientDrawable.OVAL);
         dotDrawable.setColor(COLOR_IDLE);
 
-        zone = new FrameLayout(ctx);
+        zone = new Zone(ctx);
+        zone.setFocusableInTouchMode(true);
         dot = new View(ctx);
         dot.setBackground(dotDrawable);
         zone.addView(dot, new FrameLayout.LayoutParams(dp(DP_DOT), dp(DP_DOT), Gravity.CENTER));
@@ -72,8 +100,7 @@ class DotOverlay {
                 Build.VERSION.SDK_INT >= 26
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         p.gravity = Gravity.BOTTOM | Gravity.END;
         p.x = dp(12);
@@ -96,6 +123,7 @@ class DotOverlay {
 
         try {
             wm.addView(zone, p);
+            zone.requestFocus();
         } catch (Exception ignored) {
             zone = null;
         }

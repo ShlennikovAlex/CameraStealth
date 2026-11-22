@@ -45,6 +45,7 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
 
     private boolean front;
     private boolean recording;
+    private boolean photo;
     private boolean mic;
     private boolean sound;
     private boolean vibro;
@@ -69,20 +70,16 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
             if (now < 0) return;
 
             AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            int base = -1;
-            if (am != null) {
-                try { base = am.getStreamVolume(AudioManager.STREAM_MUSIC); }
-                catch (Exception ignored) { }
-            }
-            if (base < 0) return;
+            if (am == null) return;
+
+            int base;
+            try { base = am.getStreamVolume(AudioManager.STREAM_MUSIC); }
+            catch (Exception e) { return; }
 
             if (now < base) {
                 try { am.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0); }
                 catch (Exception ignored) { }
                 onVolumeDown();
-            } else {
-                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0); }
-                catch (Exception ignored) { }
             }
         }
     };
@@ -100,6 +97,7 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         mic = p.getBoolean("mic", true);
         sound = p.getBoolean("sound", false);
         vibro = p.getBoolean("vibro", true);
+        photo = "photo".equals(p.getString("mode", "video"));
 
         engine = new Recorder(this, cam);
         engine.setMic(mic);
@@ -141,6 +139,10 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
     }
 
     private void toggle() {
+        if (photo) {
+            snap();
+            return;
+        }
         if (recording) stopRecording();
         else startRecording();
     }
@@ -169,6 +171,19 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
                 registerReceiver(volumeReceiver, f);
             }
         } catch (Exception ignored) { }
+    }
+
+    private void snap() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
+
+        feedback(true);
+        if (dot != null) {
+            dot.setRecording(true);
+            ui.postDelayed(() -> {
+                if (dot != null && !recording) dot.setRecording(false);
+            }, 260);
+        }
+        engine.shot();
     }
 
     private void startRecording() {

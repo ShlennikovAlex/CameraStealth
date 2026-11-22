@@ -10,14 +10,17 @@ import android.hardware.camera2.CaptureRequest;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.ParcelFileDescriptor;
 import android.util.Size;
 import android.view.Surface;
 import android.view.WindowManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
@@ -34,6 +37,9 @@ class Recorder {
     private CameraCaptureSession session;
     private MediaRecorder rec;
     private ImageReader reader;
+
+    private Uri uri;
+    private ParcelFileDescriptor pfd;
 
     private String camId = "0";
     private boolean front;
@@ -72,7 +78,8 @@ class Recorder {
             if (manager == null) return;
             camId = find(front);
 
-            File out = new File(movies(), "VID_" + stamp() + ".mp4");
+            String name = "VID_" + stamp() + ".mp4";
+            uri = MediaSink.newVideo(ctx, name);
 
             rec = new MediaRecorder();
             rec.setVideoSource(MediaRecorder.VideoSource.SURFACE);
@@ -88,7 +95,16 @@ class Recorder {
                 rec.setAudioSamplingRate(44100);
             }
             rec.setOrientationHint(hint());
-            rec.setOutputFile(out.getAbsolutePath());
+
+            if (uri != null) {
+                pfd = ctx.getContentResolver().openFileDescriptor(uri, "w");
+            }
+            if (pfd != null) {
+                rec.setOutputFile(pfd.getFileDescriptor());
+            } else {
+                rec.setOutputFile(new File(movies(), name).getAbsolutePath());
+            }
+
             rec.prepare();
 
             final Surface surface = rec.getSurface();
@@ -165,12 +181,26 @@ class Recorder {
                     byte[] data = new byte[buf.remaining()];
                     buf.get(data);
 
-                    File out = new File(pictures(), "IMG_" + stamp() + ".jpg");
-                    FileOutputStream fos = new FileOutputStream(out);
-                    try {
-                        fos.write(data);
-                    } finally {
-                        fos.close();
+                    String name = "IMG_" + stamp() + ".jpg";
+                    Uri target = MediaSink.newPhoto(ctx, name);
+
+                    if (target != null) {
+                        OutputStream os = ctx.getContentResolver().openOutputStream(target);
+                        if (os != null) {
+                            try {
+                                os.write(data);
+                            } finally {
+                                os.close();
+                            }
+                            MediaSink.finish(ctx, target);
+                        }
+                    } else {
+                        FileOutputStream fos = new FileOutputStream(new File(pictures(), name));
+                        try {
+                            fos.write(data);
+                        } finally {
+                            fos.close();
+                        }
                     }
                 } catch (Exception ignored) {
                 } finally {
@@ -282,6 +312,10 @@ class Recorder {
         rec = null;
         try { if (device != null) device.close(); } catch (Exception ignored) { }
         device = null;
+        try { if (pfd != null) pfd.close(); } catch (Exception ignored) { }
+        pfd = null;
+        MediaSink.finish(ctx, uri);
+        uri = null;
     }
 
     private File movies() {

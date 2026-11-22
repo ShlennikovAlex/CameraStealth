@@ -1,18 +1,24 @@
 package com.example.camerastealth;
 
 import android.content.Context;
+import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.MediaRecorder;
 import android.os.Environment;
 import android.os.Handler;
+import android.util.Size;
 import android.view.Surface;
 import android.view.WindowManager;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Date;
@@ -27,6 +33,7 @@ class Recorder {
     private CameraDevice device;
     private CameraCaptureSession session;
     private MediaRecorder rec;
+    private ImageReader reader;
 
     private String camId = "0";
     private boolean front;
@@ -53,17 +60,19 @@ class Recorder {
         cam.post(this::release);
     }
 
+    void shot() {
+        cam.post(this::shoot);
+    }
+
+    // ---------- видео ----------
+
     private void open() {
         try {
             manager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
             if (manager == null) return;
             camId = find(front);
 
-            File dir = new File(ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Stealth");
-            if (!dir.exists()) dir.mkdirs();
-            String name = "VID_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-                    .format(new Date()) + ".mp4";
-            File out = new File(dir, name);
+            File out = new File(movies(), "VID_" + stamp() + ".mp4");
 
             rec = new MediaRecorder();
             rec.setVideoSource(MediaRecorder.VideoSource.SURFACE);
@@ -87,7 +96,7 @@ class Recorder {
                 @Override
                 public void onOpened(CameraDevice c) {
                     device = c;
-                    configure(c, surface);
+                    configureVideo(c, surface);
                 }
 
                 @Override
@@ -108,7 +117,7 @@ class Recorder {
         }
     }
 
-    private void configure(CameraDevice c, Surface surface) {
+    private void configureVideo(CameraDevice c, Surface surface) {
         try {
             c.createCaptureSession(Collections.singletonList(surface),
                     new CameraCaptureSession.StateCallback() {
@@ -136,6 +145,129 @@ class Recorder {
         }
     }
 
+    // ---------- фото ----------
+
+    private void shoot() {
+        try {
+            manager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+            if (manager == null) return;
+            camId = find(front);
+
+            final Size size = pickSize();
+            reader = ImageReader.newInstance(size.getWidth(), size.getHeight(),
+                    ImageFormat.JPEG, 2);
+
+            reader.setOnImageAvailableListener(r -> {
+                Image img = null;
+                try {
+                    img = r.acquireNextImage();
+                    ByteBuffer buf = img.getPlanes()[0].getBuffer();
+                    byte[] data = new byte[buf.remaining()];
+                    buf.get(data);
+
+                    File out = new File(pictures(), "IMG_" + stamp() + ".jpg");
+                    FileOutputStream fos = new FileOutputStream(out);
+                    try {
+                        fos.write(data);
+                    } finally {
+                        fos.close();
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    try { if (img != null) img.close(); } catch (Exception ignored) { }
+                    try { r.close(); } catch (Exception ignored) { }
+                    closeDevice();
+                }
+            }, cam);
+
+            final Surface surface = reader.getSurface();
+            manager.openCamera(camId, new CameraDevice.StateCallback() {
+                @Override
+                public void onOpened(CameraDevice c) {
+                    device = c;
+                    try {
+                        c.createCaptureSession(Collections.singletonList(surface),
+                                new CameraCaptureSession.StateCallback() {
+                                    @Override
+                                    public void onConfigured(CameraCaptureSession s) {
+                                        session = s;
+                                        try {
+                                            CaptureRequest.Builder b =
+                                                    c.createCaptureRequest(
+                                                            CameraDevice.TEMPLATE_STILL_CAPTURE);
+                                            b.addTarget(surface);
+                                            b.set(CaptureRequest.JPEG_ORIENTATION, hint());
+                                            s.capture(b.build(), null, cam);
+                                        } catch (Exception ignored) {
+                                            closeDevice();
+                                        }
+                                    }
+
+                                    @Override
+                                    public void onConfigureFailed(CameraCaptureSession s) {
+                                        closeDevice();
+                                    }
+                                }, cam);
+                    } catch (Exception ignored) {
+                        closeDevice();
+                    }
+                }
+
+                @Override
+                public void onDisconnected(CameraDevice c) {
+                    c.close();
+                    device = null;
+                }
+
+                @Override
+                public void onError(CameraDevice c, int e) {
+                    c.close();
+                    device = null;
+                    closeDevice();
+                }
+            }, cam);
+        } catch (Exception ignored) {
+            closeDevice();
+        }
+    }
+
+    private Size pickSize() {
+        try {
+            android.hardware.camera2.params.StreamConfigurationMap map =
+                    manager.getCameraCharacteristics(camId)
+                            .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            if (map == null) return new Size(1280, 720);
+            Size[] sizes = map.getOutputSizes(ImageFormat.JPEG);
+            if (sizes == null || sizes.length == 0) return new Size(1280, 720);
+
+            Size best = null;
+            for (Size s : sizes) {
+                if (s.getWidth() > 2000) continue;
+                if (best == null
+                        || s.getWidth() * s.getHeight() > best.getWidth() * best.getHeight()) {
+                    best = s;
+                }
+            }
+            return best == null ? sizes[0] : best;
+        } catch (Exception ignored) {
+            return new Size(1280, 720);
+        }
+    }
+
+    private void closeDevice() {
+        try {
+            if (session != null) {
+                session.stopRepeating();
+                session.close();
+            }
+        } catch (Exception ignored) { }
+        session = null;
+        try { if (device != null) device.close(); } catch (Exception ignored) { }
+        device = null;
+    }
+
+    // ---------- общее ----------
+
     private void release() {
         try {
             if (session != null) {
@@ -150,6 +282,22 @@ class Recorder {
         rec = null;
         try { if (device != null) device.close(); } catch (Exception ignored) { }
         device = null;
+    }
+
+    private File movies() {
+        File dir = new File(ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Stealth");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private File pictures() {
+        File dir = new File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Stealth");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private String stamp() {
+        return new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
     }
 
     private String find(boolean wantFront) {

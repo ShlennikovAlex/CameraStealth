@@ -54,7 +54,7 @@ public class StealthActivity extends Activity {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(10), dp(10),
                 Gravity.BOTTOM | Gravity.END);
         lp.rightMargin = dp(28);
-        lp.bottomMargin = dp(108);
+        lp.bottomMargin = dp(168);
         root.addView(dot, lp);
         setContentView(root);
 

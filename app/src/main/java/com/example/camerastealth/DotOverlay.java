@@ -6,6 +6,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -19,13 +21,16 @@ class DotOverlay {
         void onTap();
         void onLongPress();
         void onVolumeDown();
+        void onVolumeUp();
     }
 
     private static final int COLOR_IDLE = 0xFF9E9E9E;
+    private static final int COLOR_FRONT = 0xFF3B82F6;
     private static final int COLOR_REC = 0xFFE53935;
     private static final int DP_DOT = 10;
-    private static final int DP_ZONE = 44;
+    private static final int DP_ZONE = 56;
     private static final int DP_BOTTOM = 156;
+    private static final long LONG_MS = 330;
 
     private final Context ctx;
     private Listener listener;
@@ -36,9 +41,12 @@ class DotOverlay {
     private View dot;
     private GradientDrawable dotDrawable;
     private boolean longFired;
+    private boolean front;
+    private boolean recording;
 
     private final Runnable longPress = () -> {
         longFired = true;
+        buzz(45);
         listener.onLongPress();
     };
 
@@ -67,12 +75,14 @@ class DotOverlay {
 
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
                 longFired = false;
-                ui.postDelayed(longPress, 480);
+                if (dot != null) dot.setAlpha(0.4f);
+                ui.postDelayed(longPress, LONG_MS);
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_UP
                     || e.getAction() == MotionEvent.ACTION_CANCEL) {
                 ui.removeCallbacks(longPress);
+                if (dot != null) dot.setAlpha(1f);
                 if (!longFired) listener.onTap();
                 return true;
             }
@@ -88,6 +98,9 @@ class DotOverlay {
                 return true;
             }
             if (code == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+                    listener.onVolumeUp();
+                }
                 return true;
             }
             if (code == KeyEvent.KEYCODE_BACK
@@ -106,7 +119,7 @@ class DotOverlay {
 
         dotDrawable = new GradientDrawable();
         dotDrawable.setShape(GradientDrawable.OVAL);
-        dotDrawable.setColor(COLOR_IDLE);
+        dotDrawable.setColor(front ? COLOR_FRONT : COLOR_IDLE);
 
         zone = new Zone(ctx);
         zone.setFocusableInTouchMode(true);
@@ -119,11 +132,10 @@ class DotOverlay {
                 Build.VERSION.SDK_INT >= 26
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
         p.gravity = Gravity.BOTTOM | Gravity.END;
-        p.x = dp(12);
+        p.x = dp(6);
         p.y = dp(DP_BOTTOM);
 
         try {
@@ -145,10 +157,29 @@ class DotOverlay {
 
     void setRecording(boolean rec) {
         if (dot == null) return;
+        recording = rec;
         ui.removeCallbacks(blink);
-        dotDrawable.setColor(rec ? COLOR_REC : COLOR_IDLE);
+        dotDrawable.setColor(rec ? COLOR_REC : (front ? COLOR_FRONT : COLOR_IDLE));
         dot.setAlpha(1f);
         if (rec) ui.postDelayed(blink, 700);
+    }
+
+    void setFront(boolean isFront) {
+        front = isFront;
+        if (dot == null || recording) return;
+        dotDrawable.setColor(isFront ? COLOR_FRONT : COLOR_IDLE);
+    }
+
+    private void buzz(int ms) {
+        try {
+            Vibrator v = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
+            if (v == null) return;
+            if (Build.VERSION.SDK_INT >= 26) {
+                v.vibrate(VibrationEffect.createOneShot(ms, 255));
+            } else {
+                v.vibrate(ms);
+            }
+        } catch (Exception ignored) { }
     }
 
     private int dp(int v) {

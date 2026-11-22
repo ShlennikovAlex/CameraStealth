@@ -8,6 +8,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.widget.RadioButton;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -21,6 +22,7 @@ public class MainActivity extends Activity {
     private static final String K_SOUND = "sound";
     private static final String K_VIBRO = "vibro";
     private static final String K_MIC = "mic";
+    private static final String K_MODE = "mode";
     private static final int REQ = 7;
 
     private SharedPreferences prefs;
@@ -37,6 +39,22 @@ public class MainActivity extends Activity {
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         permState = findViewById(R.id.perm_state);
+
+        RadioButton modeVideo = findViewById(R.id.mode_video);
+        RadioButton modePhoto = findViewById(R.id.mode_photo);
+
+        boolean isPhoto = "photo".equals(prefs.getString(K_MODE, "video"));
+        modePhoto.setChecked(isPhoto);
+        modeVideo.setChecked(!isPhoto);
+
+        findViewById(R.id.mode).setOnClickListener(v -> { });
+
+        modeVideo.setOnCheckedChangeListener((v, on) -> {
+            if (on) prefs.edit().putString(K_MODE, "video").apply();
+        });
+        modePhoto.setOnCheckedChangeListener((v, on) -> {
+            if (on) prefs.edit().putString(K_MODE, "photo").apply();
+        });
 
         Switch swSound = findViewById(R.id.sw_sound);
         Switch swVibro = findViewById(R.id.sw_vibro);

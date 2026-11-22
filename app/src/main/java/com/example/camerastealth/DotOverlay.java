@@ -25,6 +25,7 @@ class DotOverlay {
     private static final int COLOR_REC = 0xFFE53935;
     private static final int DP_DOT = 10;
     private static final int DP_ZONE = 44;
+    private static final int DP_BOTTOM = 156;
 
     private final Context ctx;
     private Listener listener;
@@ -58,6 +59,24 @@ class DotOverlay {
     private class Zone extends FrameLayout {
         Zone(Context c) {
             super(c);
+        }
+
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent e) {
+            if (e.getAction() == MotionEvent.ACTION_OUTSIDE) return false;
+
+            if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                longFired = false;
+                ui.postDelayed(longPress, 480);
+                return true;
+            }
+            if (e.getAction() == MotionEvent.ACTION_UP
+                    || e.getAction() == MotionEvent.ACTION_CANCEL) {
+                ui.removeCallbacks(longPress);
+                if (!longFired) listener.onTap();
+                return true;
+            }
+            return true;
         }
 
         @Override
@@ -100,26 +119,12 @@ class DotOverlay {
                 Build.VERSION.SDK_INT >= 26
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
         p.gravity = Gravity.BOTTOM | Gravity.END;
         p.x = dp(12);
-        p.y = dp(96);
-
-        zone.setOnTouchListener((v, e) -> {
-            if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                longFired = false;
-                ui.postDelayed(longPress, 480);
-                return true;
-            }
-            if (e.getAction() == MotionEvent.ACTION_UP
-                    || e.getAction() == MotionEvent.ACTION_CANCEL) {
-                ui.removeCallbacks(longPress);
-                if (!longFired) listener.onTap();
-                return true;
-            }
-            return true;
-        });
+        p.y = dp(DP_BOTTOM);
 
         try {
             wm.addView(zone, p);

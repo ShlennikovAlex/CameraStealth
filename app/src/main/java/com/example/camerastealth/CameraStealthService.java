@@ -49,7 +49,6 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
     private boolean sound;
     private boolean vibro;
     private int burst;
-    private int baseVolume = -1;
 
     private MediaActionSound actionSound;
     private PowerManager.WakeLock wakeLock;
@@ -67,22 +66,24 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
             if (stream != AudioManager.STREAM_MUSIC) return;
 
             int now = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1);
-            if (now < 0 || baseVolume < 0) return;
-            if (now == baseVolume) return;
-
-            boolean down = now < baseVolume;
+            if (now < 0) return;
 
             AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            int base = -1;
             if (am != null) {
-                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, baseVolume, 0); }
+                try { base = am.getStreamVolume(AudioManager.STREAM_MUSIC); }
                 catch (Exception ignored) { }
             }
+            if (base < 0) return;
 
-            if (!down) return;
-
-            burst++;
-            ui.removeCallbacks(burstEnd);
-            ui.postDelayed(burstEnd, BURST_MS);
+            if (now < base) {
+                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0); }
+                catch (Exception ignored) { }
+                onVolumeDown();
+            } else {
+                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0); }
+                catch (Exception ignored) { }
+            }
         }
     };
 
@@ -113,7 +114,6 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
             dot.show();
         }
 
-        rememberVolume();
         registerVolume();
         acquireWake();
     }
@@ -131,6 +131,13 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
             startActivity(i);
         } catch (Exception ignored) { }
         disarm();
+    }
+
+    @Override
+    public void onVolumeDown() {
+        burst++;
+        ui.removeCallbacks(burstEnd);
+        ui.postDelayed(burstEnd, BURST_MS);
     }
 
     private void toggle() {
@@ -151,19 +158,6 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         front = !front;
         engine.setFront(front);
         if (was) ui.postDelayed(this::startRecording, 700);
-    }
-
-    private void rememberVolume() {
-        try {
-            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            if (am == null) return;
-            baseVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-            if (Build.VERSION.SDK_INT >= 28
-                    && baseVolume <= am.getStreamMinVolume(AudioManager.STREAM_MUSIC)) {
-                baseVolume = am.getStreamMinVolume(AudioManager.STREAM_MUSIC) + 1;
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, baseVolume, 0);
-            }
-        } catch (Exception ignored) { }
     }
 
     private void registerVolume() {

@@ -47,8 +47,6 @@ public class MainActivity extends Activity {
         modePhoto.setChecked(isPhoto);
         modeVideo.setChecked(!isPhoto);
 
-        findViewById(R.id.mode).setOnClickListener(v -> { });
-
         modeVideo.setOnCheckedChangeListener((v, on) -> {
             if (on) prefs.edit().putString(K_MODE, "video").apply();
         });
@@ -96,6 +94,10 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             need.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (Build.VERSION.SDK_INT < 29
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }
 
         if (need.isEmpty()) {

@@ -294,7 +294,7 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
 
         return b.setContentTitle("Заметки")
                 .setContentText("Свернуто")
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setSmallIcon(R.drawable.ic_note)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .build();

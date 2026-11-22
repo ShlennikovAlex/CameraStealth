@@ -138,6 +138,11 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         ui.postDelayed(burstEnd, BURST_MS);
     }
 
+    @Override
+    public void onVolumeUp() {
+        switchCamera();
+    }
+
     private void toggle() {
         if (photo) {
             snap();
@@ -159,6 +164,8 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         if (was) stopRecording();
         front = !front;
         engine.setFront(front);
+        if (dot != null) dot.setFront(front);
+        buzz(35);
         if (was) ui.postDelayed(this::startRecording, 700);
     }
 
@@ -210,19 +217,7 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
     }
 
     private void feedback(boolean start) {
-        if (vibro) {
-            try {
-                Vibrator v = vibrator();
-                if (v != null) {
-                    if (Build.VERSION.SDK_INT >= 26) {
-                        v.vibrate(VibrationEffect.createOneShot(28,
-                                VibrationEffect.DEFAULT_AMPLITUDE));
-                    } else {
-                        v.vibrate(28);
-                    }
-                }
-            } catch (Exception ignored) { }
-        }
+        if (vibro) buzz(start ? 60 : 40);
         if (sound) {
             try {
                 if (actionSound == null) {
@@ -237,12 +232,23 @@ public class CameraStealthService extends Service implements DotOverlay.Listener
         }
     }
 
-    private Vibrator vibrator() {
-        if (Build.VERSION.SDK_INT >= 31) {
-            VibratorManager m = (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-            return m == null ? null : m.getDefaultVibrator();
-        }
-        return (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+    private void buzz(int ms) {
+        try {
+            Vibrator v = null;
+            if (Build.VERSION.SDK_INT >= 31) {
+                VibratorManager m =
+                        (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                if (m != null) v = m.getDefaultVibrator();
+            }
+            if (v == null) v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v == null || !v.hasVibrator()) return;
+
+            if (Build.VERSION.SDK_INT >= 26) {
+                v.vibrate(VibrationEffect.createOneShot(ms, 255));
+            } else {
+                v.vibrate(ms);
+            }
+        } catch (Exception ignored) { }
     }
 
     private void createChannel() {

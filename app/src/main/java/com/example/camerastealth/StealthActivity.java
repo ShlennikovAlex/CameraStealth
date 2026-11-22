@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -41,8 +42,7 @@ public class StealthActivity extends Activity {
         super.onCreate(state);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
 
         FrameLayout root = new FrameLayout(this);
         dot = new View(this);
@@ -59,6 +59,24 @@ public class StealthActivity extends Activity {
         setContentView(root);
 
         ui.postDelayed(tick, 300);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        int code = e.getKeyCode();
+
+        if (code == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+                try {
+                    startService(new Intent(this, CameraStealthService.class).setAction("toggle"));
+                } catch (Exception ignored) { }
+            }
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_VOLUME_UP) {
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
     }
 
     @Override
@@ -79,4 +97,3 @@ public class StealthActivity extends Activity {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }
-        
